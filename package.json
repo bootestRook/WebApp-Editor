@@ -8,6 +8,8 @@
     "dev": "vite --host 127.0.0.1",
     "dev:project": "node scripts/dev-project.mjs",
     "new-project": "node scripts/init-project.mjs",
+    "setup": "npm run codegraph:init",
+    "codegraph:init": "node scripts/init-codegraph.mjs",
     "build": "node scripts/check-root-clean.mjs && tsc -b && vite build",
     "check-root": "node scripts/check-root-clean.mjs",
     "preview": "vite preview --host 127.0.0.1",

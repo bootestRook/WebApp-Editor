@@ -2,6 +2,17 @@
 
 Use WebApp Editor as a framework/engine. App content should live in a separate project folder.
 
+## Clone Setup
+
+After cloning the framework repository:
+
+```powershell
+npm install
+npm run setup
+```
+
+This initializes `.codegraph/` locally for the checkout. Do not commit `.codegraph/`.
+
 ## Normal Flow
 
 1. Tell the AI to build under the WebApp Editor framework.

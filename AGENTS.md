@@ -4,6 +4,15 @@ This folder is the WebApp Editor framework, not an individual app project.
 
 Keep this framework root clean. Do not create `.log`, `.tmp`, `.pid`, scratch output, screenshots, generated reports, or one-off diagnostic files in this directory. Use the OS temp directory for diagnostics, or an explicit external artifact path requested by the user.
 
+After cloning this repository, run:
+
+```powershell
+npm install
+npm run setup
+```
+
+This initializes the local `.codegraph/` index. The index must stay ignored and must not be committed.
+
 Normal app work should happen in a separate project folder created with:
 
 ```powershell
