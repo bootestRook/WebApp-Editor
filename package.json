@@ -1,0 +1,29 @@
+{
+  "name": "webapp-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "editor": "vite --host 127.0.0.1",
+    "dev": "vite --host 127.0.0.1",
+    "dev:project": "node scripts/dev-project.mjs",
+    "new-project": "node scripts/init-project.mjs",
+    "build": "node scripts/check-root-clean.mjs && tsc -b && vite build",
+    "check-root": "node scripts/check-root-clean.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "validate-project": "node scripts/validate-project.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "typescript": "^5.7.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2"
+  }
+}
