@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { execFile } from 'node:child_process';
 import { defineConfig, type Plugin } from 'vite';
@@ -18,8 +19,12 @@ const configuredProjectDir = process.env.WEBAPP_PROJECT_DIR
   : null;
 let activeProjectDir: string | null = configuredProjectDir;
 let activeLayoutPath: string | null = null;
-const editorLocalDir = path.resolve(__dirname, '.webapp-editor.local');
+const editorLocalDir = path.resolve(
+  process.env.WEBAPP_EDITOR_STATE_DIR ??
+    path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'WebApp Editor')
+);
 const editorLayoutFile = path.join(editorLocalDir, 'editor-layout.json');
+const buildOutDir = path.resolve(process.env.WEBAPP_EDITOR_BUILD_DIR ?? path.join(__dirname, '.webapp-editor-build'));
 
 type ProjectFileEntry = {
   name: string;
@@ -679,6 +684,10 @@ function devEditorApi(): Plugin {
 
 export default defineConfig({
   plugins: [react(), devEditorApi()],
+  build: {
+    outDir: buildOutDir,
+    emptyOutDir: true
+  },
   server: {
     fs: {
       strict: true,

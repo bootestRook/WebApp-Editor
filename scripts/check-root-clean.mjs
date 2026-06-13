@@ -4,10 +4,21 @@ import { fileURLToPath } from 'node:url';
 
 const editorRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const forbiddenRootFilePattern = /\.(log|tmp|pid)$/i;
+const forbiddenRootDirectoryNames = new Set([
+  'dist',
+  '.vite',
+  'coverage',
+  '.webapp-editor.local',
+  '.webapp-editor-build'
+]);
 
 const entries = await fs.readdir(editorRoot, { withFileTypes: true });
 const forbidden = entries
-  .filter((entry) => entry.isFile() && forbiddenRootFilePattern.test(entry.name))
+  .filter(
+    (entry) =>
+      (entry.isFile() && forbiddenRootFilePattern.test(entry.name)) ||
+      (entry.isDirectory() && forbiddenRootDirectoryNames.has(entry.name))
+  )
   .map((entry) => entry.name)
   .sort();
 
