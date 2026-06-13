@@ -3,6 +3,7 @@ dist/
 .codegraph/
 coverage/
 .vite/
+.webapp-editor.local/
 
 *.log
 *.tmp

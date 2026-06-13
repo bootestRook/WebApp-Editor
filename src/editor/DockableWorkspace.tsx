@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
+import { loadEditorDockLayout, saveEditorDockLayout } from './services/editorLayoutService';
 
 type PanelId = 'hierarchy' | 'project' | 'scene' | 'game' | 'inspector' | 'console';
 type SplitAxis = 'x' | 'y';
@@ -74,9 +75,28 @@ type StoredDockLayout = {
   tree: DockNode;
 };
 
+type CustomDockLayoutPreset = {
+  id: string;
+  name: string;
+  tree: DockNode;
+  updatedAt: number;
+};
+
+export type EditorLayoutPresetRequest = {
+  requestId: number;
+  presetId: string;
+};
+
+export type EditorLayoutPresetSaveRequest = {
+  requestId: number;
+  presetId: string;
+  name: string;
+};
+
 const SPLITTER_SIZE = 6;
 const SPLITTER_HIT_SIZE = 18;
 const STORAGE_KEY = 'webapp-editor:dock-layout:v2';
+const CUSTOM_PRESETS_STORAGE_KEY = 'webapp-editor:dock-layout-custom-presets:v1';
 const panelIds: PanelId[] = ['hierarchy', 'project', 'scene', 'game', 'inspector', 'console'];
 const MIN_LEAF_WIDTH = 180;
 const MIN_LEAF_HEIGHT = 130;
@@ -112,6 +132,84 @@ const defaultDockTree: DockNode = {
     }
   }
 };
+
+const builtinDockLayoutPresets: Array<{ id: string; name: string; tree: DockNode }> = [
+  {
+    id: 'default',
+    name: '默认布局',
+    tree: defaultDockTree
+  },
+  {
+    id: 'wide-edit',
+    name: '宽屏编辑',
+    tree: {
+      type: 'split',
+      axis: 'x',
+      ratio: 0.16,
+      first: {
+        type: 'split',
+        axis: 'y',
+        ratio: 0.68,
+        first: { type: 'leaf', panelId: 'hierarchy' },
+        second: { type: 'leaf', panelId: 'project' }
+      },
+      second: {
+        type: 'split',
+        axis: 'x',
+        ratio: 0.74,
+        first: {
+          type: 'split',
+          axis: 'y',
+          ratio: 0.74,
+          first: { type: 'leaf', panelId: 'scene' },
+          second: { type: 'leaf', panelId: 'game' }
+        },
+        second: {
+          type: 'split',
+          axis: 'y',
+          ratio: 0.7,
+          first: { type: 'leaf', panelId: 'inspector' },
+          second: { type: 'leaf', panelId: 'console' }
+        }
+      }
+    }
+  },
+  {
+    id: 'debug-preview',
+    name: '调试预览',
+    tree: {
+      type: 'split',
+      axis: 'x',
+      ratio: 0.18,
+      first: {
+        type: 'split',
+        axis: 'y',
+        ratio: 0.5,
+        first: { type: 'leaf', panelId: 'hierarchy' },
+        second: { type: 'leaf', panelId: 'project' }
+      },
+      second: {
+        type: 'split',
+        axis: 'y',
+        ratio: 0.7,
+        first: {
+          type: 'split',
+          axis: 'x',
+          ratio: 0.55,
+          first: { type: 'leaf', panelId: 'scene' },
+          second: { type: 'leaf', panelId: 'game' }
+        },
+        second: {
+          type: 'split',
+          axis: 'x',
+          ratio: 0.62,
+          first: { type: 'leaf', panelId: 'console' },
+          second: { type: 'leaf', panelId: 'inspector' }
+        }
+      }
+    }
+  }
+];
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -182,6 +280,51 @@ function saveStoredDockLayout(tree: DockNode) {
   } catch {
     // Editor preferences are non-critical; ignore storage failures.
   }
+}
+
+function cloneDockTree(tree: DockNode) {
+  return JSON.parse(JSON.stringify(tree)) as DockNode;
+}
+
+function isCustomDockLayoutPreset(value: unknown): value is CustomDockLayoutPreset {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<CustomDockLayoutPreset>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.updatedAt === 'number' &&
+    isDockNode(candidate.tree)
+  );
+}
+
+function loadCustomDockLayoutPresets() {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_PRESETS_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter(isCustomDockLayoutPreset) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomDockLayoutPresets(presets: CustomDockLayoutPreset[]) {
+  try {
+    window.localStorage.setItem(CUSTOM_PRESETS_STORAGE_KEY, JSON.stringify(presets.slice(0, 30)));
+  } catch {
+    // Editor preferences are non-critical; ignore storage failures.
+  }
+}
+
+function getDockLayoutPreset(presetId: string) {
+  const builtinPreset = builtinDockLayoutPresets.find((preset) => preset.id === presetId);
+  if (builtinPreset) {
+    return builtinPreset;
+  }
+
+  return loadCustomDockLayoutPresets().find((preset) => preset.id === presetId) ?? null;
 }
 
 function layoutTree(
@@ -389,13 +532,36 @@ function getSlotTitle(panelId: PanelId) {
 
 type DockableWorkspaceProps = {
   childrenByPanel: Record<PanelId, ReactNode>;
+  saveLayoutRequest?: number;
+  applyLayoutPresetRequest?: EditorLayoutPresetRequest | null;
+  saveLayoutPresetRequest?: EditorLayoutPresetSaveRequest | null;
+  onLayoutSaved?: () => void;
+  onLayoutSaveError?: (message: string) => void;
+  onLayoutPresetApplied?: (name: string) => void;
+  onLayoutPresetSaved?: (name: string) => void;
 };
 
-export function DockableWorkspace({ childrenByPanel }: DockableWorkspaceProps) {
+export function DockableWorkspace({
+  childrenByPanel,
+  saveLayoutRequest = 0,
+  applyLayoutPresetRequest,
+  saveLayoutPresetRequest,
+  onLayoutSaved,
+  onLayoutSaveError,
+  onLayoutPresetApplied,
+  onLayoutPresetSaved
+}: DockableWorkspaceProps) {
   const storedLayout = useMemo(() => loadStoredDockLayout(), []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
   const dragRef = useRef<DragPanelState | null>(null);
+  const lastHandledSaveRequestRef = useRef(0);
+  const lastHandledApplyPresetRequestRef = useRef(0);
+  const lastHandledSavePresetRequestRef = useRef(0);
+  const onLayoutSavedRef = useRef(onLayoutSaved);
+  const onLayoutSaveErrorRef = useRef(onLayoutSaveError);
+  const onLayoutPresetAppliedRef = useRef(onLayoutPresetApplied);
+  const onLayoutPresetSavedRef = useRef(onLayoutPresetSaved);
   const [bounds, setBounds] = useState<Rect>({ x: 0, y: 0, width: 0, height: 0 });
   const [tree, setTree] = useState<DockNode>(storedLayout ?? defaultDockTree);
   const [dragPanel, setDragPanel] = useState<DragPanelState | null>(null);
@@ -421,9 +587,88 @@ export function DockableWorkspace({ childrenByPanel }: DockableWorkspaceProps) {
   }, []);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => saveStoredDockLayout(tree), 250);
-    return () => window.clearTimeout(timeoutId);
-  }, [tree]);
+    let cancelled = false;
+
+    void loadEditorDockLayout()
+      .then((layout) => {
+        if (!cancelled && isStoredDockLayout(layout)) {
+          setTree(layout.tree);
+        }
+      })
+      .catch(() => {
+        // Local editor preferences are optional.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    onLayoutSavedRef.current = onLayoutSaved;
+    onLayoutSaveErrorRef.current = onLayoutSaveError;
+    onLayoutPresetAppliedRef.current = onLayoutPresetApplied;
+    onLayoutPresetSavedRef.current = onLayoutPresetSaved;
+  }, [onLayoutPresetApplied, onLayoutPresetSaved, onLayoutSaveError, onLayoutSaved]);
+
+  useEffect(() => {
+    if (saveLayoutRequest <= 0 || saveLayoutRequest === lastHandledSaveRequestRef.current) {
+      return;
+    }
+
+    lastHandledSaveRequestRef.current = saveLayoutRequest;
+    const snapshot = { version: 2, tree } satisfies StoredDockLayout;
+    saveStoredDockLayout(tree);
+    void saveEditorDockLayout(snapshot)
+      .then(() => onLayoutSavedRef.current?.())
+      .catch((error) => onLayoutSaveErrorRef.current?.(error instanceof Error ? error.message : 'Failed to save editor layout'));
+  }, [saveLayoutRequest, tree]);
+
+  useEffect(() => {
+    if (!applyLayoutPresetRequest || applyLayoutPresetRequest.requestId === lastHandledApplyPresetRequestRef.current) {
+      return;
+    }
+
+    lastHandledApplyPresetRequestRef.current = applyLayoutPresetRequest.requestId;
+    const preset = getDockLayoutPreset(applyLayoutPresetRequest.presetId);
+    if (!preset) {
+      onLayoutSaveErrorRef.current?.('Editor layout preset was not found');
+      return;
+    }
+
+    const nextTree = cloneDockTree(preset.tree);
+    setTree(nextTree);
+    saveStoredDockLayout(nextTree);
+    void saveEditorDockLayout({ version: 2, tree: nextTree } satisfies StoredDockLayout)
+      .then(() => onLayoutPresetAppliedRef.current?.(preset.name))
+      .catch((error) => onLayoutSaveErrorRef.current?.(error instanceof Error ? error.message : 'Failed to apply editor layout preset'));
+  }, [applyLayoutPresetRequest]);
+
+  useEffect(() => {
+    if (!saveLayoutPresetRequest || saveLayoutPresetRequest.requestId === lastHandledSavePresetRequestRef.current) {
+      return;
+    }
+
+    lastHandledSavePresetRequestRef.current = saveLayoutPresetRequest.requestId;
+    const name = saveLayoutPresetRequest.name.trim();
+    if (!name) {
+      onLayoutSaveErrorRef.current?.('Editor layout preset name is required');
+      return;
+    }
+
+    const nextPreset: CustomDockLayoutPreset = {
+      id: saveLayoutPresetRequest.presetId,
+      name,
+      tree: cloneDockTree(tree),
+      updatedAt: Date.now()
+    };
+    const existingPresets = loadCustomDockLayoutPresets().filter((preset) => preset.id !== nextPreset.id);
+    saveCustomDockLayoutPresets([nextPreset, ...existingPresets]);
+    saveStoredDockLayout(tree);
+    void saveEditorDockLayout({ version: 2, tree } satisfies StoredDockLayout)
+      .then(() => onLayoutPresetSavedRef.current?.(name))
+      .catch((error) => onLayoutSaveErrorRef.current?.(error instanceof Error ? error.message : 'Failed to save editor layout preset'));
+  }, [saveLayoutPresetRequest, tree]);
 
   const { leaves, splitters } = useMemo(() => layoutTree(tree, bounds), [bounds, tree]);
 

@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, FolderOpen, Redo2, RefreshCw, Save, Search, Undo2, X } from 'lucide-react';
+import { Check, ChevronDown, FolderOpen, LayoutPanelTop, Plus, Redo2, RefreshCw, Save, Search, Undo2, X } from 'lucide-react';
 import type { OpenProjectResult } from '../services/projectService';
 
 const RECENT_PROJECTS_STORAGE_KEY = 'webapp-editor:recent-projects:v1';
+const CUSTOM_LAYOUT_PRESETS_STORAGE_KEY = 'webapp-editor:dock-layout-custom-presets:v1';
+
+const BUILTIN_LAYOUT_PRESETS = [
+  { id: 'default', name: '默认布局' },
+  { id: 'wide-edit', name: '宽屏编辑' },
+  { id: 'debug-preview', name: '调试预览' }
+];
 
 type RecentProject = {
   name: string;
   path: string;
   openedAt: number;
+};
+
+type LayoutPresetSummary = {
+  id: string;
+  name: string;
 };
 
 type Props = {
@@ -18,6 +30,9 @@ type Props = {
   canRedo: boolean;
   onNewProject: () => void;
   onOpenProject: (projectPath?: string) => Promise<OpenProjectResult | null>;
+  onSaveEditorLayout: () => void;
+  onSelectEditorLayoutPreset: (presetId: string) => void;
+  onSaveEditorLayoutPreset: (preset: LayoutPresetSummary) => void;
   onUndo: () => void;
   onRedo: () => void;
   onReload: () => void;
@@ -73,6 +88,28 @@ function formatRecentTime(openedAt: number) {
   });
 }
 
+function loadCustomLayoutPresetSummaries() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CUSTOM_LAYOUT_PRESETS_STORAGE_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item): item is LayoutPresetSummary => {
+        if (typeof item !== 'object' || item === null) {
+          return false;
+        }
+
+        const value = item as Record<string, unknown>;
+        return typeof value.id === 'string' && typeof value.name === 'string';
+      })
+      .map(({ id, name }) => ({ id, name }));
+  } catch {
+    return [];
+  }
+}
+
 export function Toolbar({
   dirty,
   saving,
@@ -81,13 +118,22 @@ export function Toolbar({
   canRedo,
   onNewProject,
   onOpenProject,
+  onSaveEditorLayout,
+  onSelectEditorLayoutPreset,
+  onSaveEditorLayoutPreset,
   onUndo,
   onRedo,
   onReload,
   onSave
 }: Props) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const layoutMenuRef = useRef<HTMLDivElement | null>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const [activeLayoutPresetId, setActiveLayoutPresetId] = useState<string | null>(null);
+  const [customLayoutPresets, setCustomLayoutPresets] = useState<LayoutPresetSummary[]>(() => loadCustomLayoutPresetSummaries());
+  const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(() => loadRecentProjects());
   const [recentQuery, setRecentQuery] = useState('');
@@ -99,19 +145,24 @@ export function Toolbar({
   });
 
   useEffect(() => {
-    if (!fileMenuOpen) {
+    if (!fileMenuOpen && !layoutMenuOpen) {
       return undefined;
     }
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target)) {
         setFileMenuOpen(false);
+      }
+      if (!layoutMenuRef.current?.contains(target)) {
+        setLayoutMenuOpen(false);
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setFileMenuOpen(false);
+        setLayoutMenuOpen(false);
       }
     };
 
@@ -121,11 +172,42 @@ export function Toolbar({
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [fileMenuOpen]);
+  }, [fileMenuOpen, layoutMenuOpen]);
 
   const runMenuAction = (action: () => void) => {
     action();
     setFileMenuOpen(false);
+  };
+
+  const runLayoutMenuAction = (action: () => void) => {
+    action();
+    setLayoutMenuOpen(false);
+  };
+
+  const selectLayoutPreset = (presetId: string) => {
+    setActiveLayoutPresetId(presetId);
+    onSelectEditorLayoutPreset(presetId);
+  };
+
+  const openNewPresetDialog = () => {
+    setNewPresetName('');
+    setNewPresetDialogOpen(true);
+  };
+
+  const confirmNewPreset = () => {
+    const name = newPresetName.trim();
+    if (!name) {
+      return;
+    }
+
+    const preset = {
+      id: `custom_${Date.now()}`,
+      name
+    };
+    setCustomLayoutPresets((current) => [preset, ...current.filter((item) => item.id !== preset.id)].slice(0, 30));
+    setActiveLayoutPresetId(preset.id);
+    onSaveEditorLayoutPreset(preset);
+    setNewPresetDialogOpen(false);
   };
 
   const rememberProject = (result: OpenProjectResult | null) => {
@@ -177,6 +259,44 @@ export function Toolbar({
         ) : null}
       </div>
       <div className="toolbar-actions">
+        <div className="toolbar-layout-menu" ref={layoutMenuRef}>
+          <button
+            className={`icon-button ${layoutMenuOpen ? 'is-open' : ''}`}
+            type="button"
+            onClick={() => {
+              setCustomLayoutPresets(loadCustomLayoutPresetSummaries());
+              setLayoutMenuOpen((current) => !current);
+            }}
+            title="Editor layout presets"
+          >
+            <LayoutPanelTop size={17} />
+          </button>
+          {layoutMenuOpen ? (
+            <div className="toolbar-dropdown layout-dropdown">
+              <div className="toolbar-dropdown-section-label">布局预设</div>
+              {[...BUILTIN_LAYOUT_PRESETS, ...customLayoutPresets].map((preset) => (
+                <button
+                  className={activeLayoutPresetId === preset.id ? 'is-active' : ''}
+                  key={preset.id}
+                  type="button"
+                  onClick={() => runLayoutMenuAction(() => selectLayoutPreset(preset.id))}
+                >
+                  <span>{preset.name}</span>
+                  {activeLayoutPresetId === preset.id ? <Check size={14} /> : null}
+                </button>
+              ))}
+              <div className="toolbar-dropdown-divider" />
+              <button type="button" onClick={() => runLayoutMenuAction(onSaveEditorLayout)}>
+                <Save size={14} />
+                <span>保存当前</span>
+              </button>
+              <button type="button" onClick={() => runLayoutMenuAction(openNewPresetDialog)}>
+                <Plus size={14} />
+                <span>保存新预设</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
         <button className="icon-button" type="button" onClick={onUndo} title="Undo (Ctrl+Z)" disabled={!canUndo}>
           <Undo2 size={17} />
         </button>
@@ -251,6 +371,43 @@ export function Toolbar({
             </div>
             <div className="project-manager-footer">
               <span>双击最近项目即可打开。</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {newPresetDialogOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setNewPresetDialogOpen(false)}>
+          <div className="editor-modal layout-preset-modal" role="dialog" aria-modal="true" aria-label="Save layout preset" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="editor-modal-heading">
+              <strong>保存新布局预设</strong>
+              <small>输入预设名后，当前编辑器面板布局会保存到下拉列表。</small>
+            </div>
+            <label className="field field-wide">
+              <span>预设名</span>
+              <input
+                autoFocus
+                value={newPresetName}
+                onChange={(event) => setNewPresetName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    confirmNewPreset();
+                  }
+
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setNewPresetDialogOpen(false);
+                  }
+                }}
+              />
+            </label>
+            <div className="editor-modal-actions">
+              <button type="button" onClick={() => setNewPresetDialogOpen(false)}>
+                取消
+              </button>
+              <button className="primary-button" type="button" disabled={!newPresetName.trim()} onClick={confirmNewPreset}>
+                确认
+              </button>
             </div>
           </div>
         </div>

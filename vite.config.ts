@@ -18,6 +18,8 @@ const configuredProjectDir = process.env.WEBAPP_PROJECT_DIR
   : null;
 let activeProjectDir: string | null = configuredProjectDir;
 let activeLayoutPath: string | null = null;
+const editorLocalDir = path.resolve(__dirname, '.webapp-editor.local');
+const editorLayoutFile = path.join(editorLocalDir, 'editor-layout.json');
 
 type ProjectFileEntry = {
   name: string;
@@ -337,6 +339,29 @@ function devEditorApi(): Plugin {
         const url = req.url?.split('?')[0] ?? '';
 
         try {
+          if (req.method === 'GET' && url === '/__webapp_editor/editor-layout') {
+            try {
+              const data = await fs.readFile(editorLayoutFile, 'utf8');
+              await sendJson(res, { ok: true, layout: JSON.parse(data) });
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                await sendJson(res, { ok: true, layout: null });
+                return;
+              }
+              throw error;
+            }
+            return;
+          }
+
+          if (req.method === 'POST' && url === '/__webapp_editor/editor-layout') {
+            const body = await readRequestBody(req);
+            const parsed = JSON.parse(body) as unknown;
+            await fs.mkdir(editorLocalDir, { recursive: true });
+            await fs.writeFile(editorLayoutFile, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+            await sendJson(res, { ok: true, target: path.relative(__dirname, editorLayoutFile).replaceAll('\\', '/') });
+            return;
+          }
+
           if (req.method === 'GET' && url === '/__webapp_editor/project') {
             const { raw } = await readProjectMetadata();
             res.setHeader('Content-Type', 'application/json');

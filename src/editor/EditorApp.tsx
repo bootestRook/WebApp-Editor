@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConsolePanel } from './panels/ConsolePanel';
-import { DockableWorkspace } from './DockableWorkspace';
+import { DockableWorkspace, type EditorLayoutPresetRequest, type EditorLayoutPresetSaveRequest } from './DockableWorkspace';
 import { GameView } from './panels/GameView';
 import { HierarchyPanel } from './panels/HierarchyPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
@@ -41,6 +41,9 @@ function getAcceleratedNudgeStep(startedAt: number) {
 
 export function EditorApp() {
   const { state, dispatch } = useEditorStore();
+  const [editorLayoutSaveRequest, setEditorLayoutSaveRequest] = useState(0);
+  const [editorLayoutPresetRequest, setEditorLayoutPresetRequest] = useState<EditorLayoutPresetRequest | null>(null);
+  const [editorLayoutPresetSaveRequest, setEditorLayoutPresetSaveRequest] = useState<EditorLayoutPresetSaveRequest | null>(null);
   const stateRef = useRef(state);
   const handleSaveRef = useRef<(() => Promise<void>) | null>(null);
   const nudgeRef = useRef<{
@@ -261,12 +264,33 @@ export function EditorApp() {
               return null;
             }
         }}
+        onSaveEditorLayout={() => setEditorLayoutSaveRequest((request) => request + 1)}
+        onSelectEditorLayoutPreset={(presetId) =>
+          setEditorLayoutPresetRequest({
+            requestId: Date.now(),
+            presetId
+          })
+        }
+        onSaveEditorLayoutPreset={(preset) =>
+          setEditorLayoutPresetSaveRequest({
+            requestId: Date.now(),
+            presetId: preset.id,
+            name: preset.name
+          })
+        }
         onRedo={() => dispatch({ type: 'redo' })}
         onReload={reload}
         onSave={handleSave}
         onUndo={() => dispatch({ type: 'undo' })}
       />
       <DockableWorkspace
+        saveLayoutRequest={editorLayoutSaveRequest}
+        applyLayoutPresetRequest={editorLayoutPresetRequest}
+        saveLayoutPresetRequest={editorLayoutPresetSaveRequest}
+        onLayoutSaved={() => dispatch({ type: 'log', message: 'Saved editor workspace layout locally' })}
+        onLayoutSaveError={(message) => dispatch({ type: 'log', message })}
+        onLayoutPresetApplied={(name) => dispatch({ type: 'log', message: `Applied editor workspace layout preset: ${name}` })}
+        onLayoutPresetSaved={(name) => dispatch({ type: 'log', message: `Saved editor workspace layout preset: ${name}` })}
         childrenByPanel={{
           hierarchy: <HierarchyPanel />,
           project: <ProjectPanel />,
