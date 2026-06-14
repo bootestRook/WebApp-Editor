@@ -20,11 +20,21 @@ if (!projectArg || projectArg.startsWith('-')) {
 }
 
 const projectRoot = path.resolve(process.cwd(), projectArg);
-const manifestFile = path.join(projectRoot, 'project.webapp.json');
+let resolvedProjectRoot = projectRoot;
+let manifestFile = path.join(resolvedProjectRoot, 'project.webapp.json');
 
 if (!fs.existsSync(projectRoot) || !fs.statSync(projectRoot).isDirectory()) {
   console.error(`Project folder does not exist: ${projectRoot}`);
   process.exit(1);
+}
+
+if (!fs.existsSync(manifestFile)) {
+  const nestedProjectRoot = path.join(projectRoot, 'webapp');
+  const nestedManifestFile = path.join(nestedProjectRoot, 'project.webapp.json');
+  if (fs.existsSync(nestedManifestFile)) {
+    resolvedProjectRoot = nestedProjectRoot;
+    manifestFile = nestedManifestFile;
+  }
 }
 
 if (!fs.existsSync(manifestFile)) {
@@ -41,7 +51,7 @@ const child = spawn(
     cwd: editorRoot,
     env: {
       ...process.env,
-      WEBAPP_PROJECT_DIR: projectRoot
+      WEBAPP_PROJECT_DIR: resolvedProjectRoot
     },
     stdio: 'inherit'
   }

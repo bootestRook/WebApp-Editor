@@ -1,8 +1,9 @@
 import type { WebAppProject } from '../../runtime/runtimeTypes';
 import {
-  BASE_RESOLUTION,
   DEFAULT_ASSETS_ROOT,
   DEFAULT_ENTRY_LAYOUT,
+  formatSupportedBaseResolutions,
+  isSupportedBaseResolution,
   WEBAPP_ENGINE,
   WEBAPP_PROJECT_VERSION
 } from './projectContract';
@@ -70,11 +71,8 @@ export function parseProjectSchema(value: unknown): WebAppProject {
     throw new Error(`project.webapp.json: "version" must be ${WEBAPP_PROJECT_VERSION}`);
   }
 
-  if (
-    project.baseResolution.width !== BASE_RESOLUTION.width ||
-    project.baseResolution.height !== BASE_RESOLUTION.height
-  ) {
-    throw new Error(`project.webapp.json: baseResolution must be ${BASE_RESOLUTION.width}x${BASE_RESOLUTION.height}`);
+  if (!isSupportedBaseResolution(project.baseResolution)) {
+    throw new Error(`project.webapp.json: baseResolution must be one of ${formatSupportedBaseResolutions()}`);
   }
 
   if (!project.entryLayout.endsWith('.json')) {

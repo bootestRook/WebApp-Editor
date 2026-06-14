@@ -25,7 +25,7 @@ if (!targetArg) {
 }
 
 const projectRoot = path.resolve(process.cwd(), targetArg);
-const projectName = path.basename(projectRoot) || 'WebApp Project';
+const projectName = process.env.WEBAPP_PROJECT_NAME?.trim() || path.basename(projectRoot) || 'WebApp Project';
 const manifestFile = path.join(projectRoot, 'project.webapp.json');
 
 try {
@@ -49,8 +49,8 @@ await writeJson(manifestFile, {
   version: 1,
   name: projectName,
   baseResolution: {
-    width: 2560,
-    height: 1440
+    width: 1920,
+    height: 1080
   },
   entryLayout: 'layouts/main_page.layout.json',
   assetsRoot: 'assets'
@@ -60,8 +60,8 @@ await writeJson(path.join(projectRoot, 'layouts', 'main_page.layout.json'), {
   id: 'main_page',
   name: 'Main Page',
   baseResolution: {
-    width: 2560,
-    height: 1440
+    width: 1920,
+    height: 1080
   },
   elements: [
     {
@@ -70,8 +70,8 @@ await writeJson(path.join(projectRoot, 'layouts', 'main_page.layout.json'), {
       name: 'Background',
       x: 0,
       y: 0,
-      width: 2560,
-      height: 1440,
+      width: 1920,
+      height: 1080,
       style: {
         fill: '#10141b'
       }
@@ -80,14 +80,14 @@ await writeJson(path.join(projectRoot, 'layouts', 'main_page.layout.json'), {
       id: 'headline',
       type: 'text',
       name: 'Headline',
-      x: 180,
-      y: 160,
-      width: 1500,
-      height: 120,
+      x: 135,
+      y: 120,
+      width: 1125,
+      height: 90,
       text: projectName,
       style: {
         color: '#f3f7ff',
-        fontSize: 72,
+        fontSize: 54,
         fontWeight: 800,
         textAlign: 'left'
       }
@@ -96,14 +96,14 @@ await writeJson(path.join(projectRoot, 'layouts', 'main_page.layout.json'), {
       id: 'body_copy',
       type: 'text',
       name: 'Body Copy',
-      x: 184,
-      y: 310,
-      width: 1320,
-      height: 120,
+      x: 138,
+      y: 233,
+      width: 990,
+      height: 90,
       text: 'This project is editable in WebApp Editor and runnable through /play.',
       style: {
         color: '#9fb0c6',
-        fontSize: 34,
+        fontSize: 26,
         fontWeight: 500,
         textAlign: 'left'
       }
@@ -112,15 +112,15 @@ await writeJson(path.join(projectRoot, 'layouts', 'main_page.layout.json'), {
       id: 'primary_action',
       type: 'button',
       name: 'Primary Action',
-      x: 184,
-      y: 490,
-      width: 360,
-      height: 96,
+      x: 138,
+      y: 368,
+      width: 270,
+      height: 72,
       text: 'Start',
       style: {
         fill: '#2f80ed',
         color: '#ffffff',
-        fontSize: 32,
+        fontSize: 24,
         fontWeight: 800,
         radius: 16
       }

@@ -1,12 +1,16 @@
-import { useRef, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { Monitor } from 'lucide-react';
 import { RuntimeRenderer } from '../../runtime/RuntimeRenderer';
 import { useEditorStore } from '../store/editorStore';
 import { ResolutionSelector } from '../tools/ResolutionSelector';
-import { BUILTIN_RESOLUTION_PRESETS, type ResolutionPreset } from '../tools/resolutionPresets';
+import {
+  BUILTIN_RESOLUTION_PRESETS,
+  createResolutionPresetFromSize,
+  type ResolutionPreset
+} from '../tools/resolutionPresets';
 import { useViewportScale } from '../tools/useViewportScale';
 
-const RESOLUTION_STORAGE_KEY = 'webapp-editor:active-resolution:v1';
+const RESOLUTION_STORAGE_KEY = 'webapp-editor:active-resolution:v2';
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -32,6 +36,19 @@ export function GameView() {
   const fitScale = useViewportScale(stageRef, 24, 24, 0.25, resolution.width, resolution.height);
   const [zoomMultiplier, setZoomMultiplier] = useState(1);
   const scale = clamp(fitScale * zoomMultiplier, 0.03, 4);
+
+  useEffect(() => {
+    if (!state.project) {
+      return;
+    }
+
+    const projectResolution = createResolutionPresetFromSize(
+      state.project.baseResolution.width,
+      state.project.baseResolution.height
+    );
+    setResolution(projectResolution);
+    saveActiveResolution(projectResolution);
+  }, [state.project?.baseResolution.height, state.project?.baseResolution.width]);
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();

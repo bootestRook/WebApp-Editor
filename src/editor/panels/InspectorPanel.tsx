@@ -1,6 +1,7 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Code2, Layers, Plus, Save, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { ProjectAsset, RuntimeElement, RuntimeScriptBinding, RuntimeStyle } from '../../runtime/runtimeTypes';
+import { DEFAULT_ROTATION } from '../../shared/schema/projectContract';
 import { saveLayout } from '../services/layoutService';
 import { useEditorStore } from '../store/editorStore';
 
@@ -15,6 +16,11 @@ const PRESET_LAYER_GROUPS = [
 
 function asInt(value: string) {
   return Math.round(Number(value) || 0);
+}
+
+function asFloat(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function loadCustomLayerGroups() {
@@ -51,6 +57,42 @@ function NumberField({ label, value, onChange, onBeginEdit, onEndEdit }: NumberF
         onChange={(event) => onChange(asInt(event.target.value))}
         onFocus={onBeginEdit}
       />
+    </label>
+  );
+}
+
+type DecimalFieldProps = {
+  label: string;
+  value: number;
+  step?: number;
+  min?: number;
+  onChange: (value: number) => void;
+  onBeginEdit: () => void;
+  onEndEdit: () => void;
+};
+
+function DecimalField({ label, value, step = 0.01, min, onChange, onBeginEdit, onEndEdit }: DecimalFieldProps) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={Number.isFinite(value) ? value : 0}
+        onBlur={onEndEdit}
+        onChange={(event) => onChange(asFloat(event.target.value))}
+        onFocus={onBeginEdit}
+      />
+    </label>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input readOnly value={value} />
     </label>
   );
 }
@@ -272,6 +314,27 @@ export function InspectorPanel() {
         .sort((a, b) => a.path.localeCompare(b.path)),
     [state.assets]
   );
+  const selectedImageAsset = useMemo(() => {
+    if (!selectedElement || selectedElement.type !== 'image') {
+      return null;
+    }
+
+    const source = selectedElement.sourceAsset ?? selectedElement.src;
+    if (!source) {
+      return null;
+    }
+
+    return state.assets.find((asset) => asset.kind === 'image' && (asset.assetPath === source || asset.path === source)) ?? null;
+  }, [selectedElement, state.assets]);
+  const selectedImageNaturalSize =
+    selectedImageAsset?.naturalWidth && selectedImageAsset.naturalHeight
+      ? {
+          width: selectedImageAsset.naturalWidth,
+          height: selectedImageAsset.naturalHeight
+        }
+      : null;
+  const selectedImageScale =
+    selectedElement && selectedImageNaturalSize ? selectedElement.width / selectedImageNaturalSize.width : null;
 
   const updateElement = (patch: Partial<RuntimeElement>) => {
     if (!selectedElement) {
@@ -300,6 +363,17 @@ export function InspectorPanel() {
     updateElement({
       layerGroup,
       layerOrder: existingLayerOrder ?? preset?.order ?? selectedElement?.layerOrder ?? 0
+    });
+  };
+
+  const updateImageScale = (scale: number) => {
+    if (!selectedImageNaturalSize || scale <= 0) {
+      return;
+    }
+
+    updateElement({
+      width: Math.max(1, Math.round(selectedImageNaturalSize.width * scale)),
+      height: Math.max(1, Math.round(selectedImageNaturalSize.height * scale))
     });
   };
 
@@ -474,6 +548,15 @@ export function InspectorPanel() {
               onChange={(height) => updateElement({ height: Math.max(1, height) })}
             />
           </div>
+          <div className="field-grid">
+            <NumberField
+              label="Rotation"
+              value={selectedElement.rotation ?? DEFAULT_ROTATION}
+              onBeginEdit={beginEdit}
+              onEndEdit={endEdit}
+              onChange={(rotation) => updateElement({ rotation })}
+            />
+          </div>
           {selectedElement.type !== 'panel' && selectedElement.type !== 'image' ? (
             <TextField label="Text" value={selectedElement.text ?? ''} onBeginEdit={beginEdit} onEndEdit={endEdit} onChange={(text) => updateElement({ text })} />
           ) : null}
@@ -487,6 +570,20 @@ export function InspectorPanel() {
           ) : null}
           {selectedElement.type === 'image' ? (
             <TextField label="Source" value={selectedElement.src ?? ''} onBeginEdit={beginEdit} onEndEdit={endEdit} onChange={(src) => updateElement({ src })} />
+          ) : null}
+          {selectedElement.type === 'image' && selectedImageNaturalSize ? (
+            <div className="field-grid">
+              <DecimalField
+                label="Scale"
+                value={Number((selectedImageScale ?? 1).toFixed(2))}
+                min={0.01}
+                step={0.01}
+                onBeginEdit={beginEdit}
+                onEndEdit={endEdit}
+                onChange={updateImageScale}
+              />
+              <ReadOnlyField label="Original" value={`${selectedImageNaturalSize.width} x ${selectedImageNaturalSize.height}`} />
+            </div>
           ) : null}
           <div className="field-grid">
             {selectedElement.type !== 'image' ? (

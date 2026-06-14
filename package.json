@@ -10,8 +10,8 @@
     "new-project": "node scripts/init-project.mjs",
     "setup": "npm run codegraph:init",
     "codegraph:init": "node scripts/init-codegraph.mjs",
-    "build": "node scripts/check-root-clean.mjs && tsc -b && vite build && node scripts/clean-build-output.mjs",
-    "check-root": "node scripts/check-root-clean.mjs",
+    "build": "npm run check-root && tsc -b && vite build && node scripts/clean-build-output.mjs",
+    "check-root": "node scripts/check-root-clean.mjs && node scripts/check-text-encoding.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "validate-project": "node scripts/validate-project.mjs"
   },

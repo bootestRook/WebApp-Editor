@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
-import { Edit3, Eye, EyeOff, Layers, Plus, Search, Trash2 } from 'lucide-react';
+import { Copy, Edit3, Eye, EyeOff, Layers, Plus, Search, Trash2 } from 'lucide-react';
 import type { ElementType, RuntimeElement } from '../../runtime/runtimeTypes';
 import { applyAssetOverrides } from '../services/projectService';
 import { useEditorStore } from '../store/editorStore';
@@ -115,6 +115,12 @@ export function HierarchyPanel() {
     contextMenu?.kind === 'element'
       ? elements.find((element) => element.id === contextMenu.elementId)
       : null;
+  const contextSelectionIds =
+    contextMenu?.kind === 'element'
+      ? state.selectedElementIds.includes(contextMenu.elementId)
+        ? state.selectedElementIds
+        : [contextMenu.elementId]
+      : [];
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -146,6 +152,15 @@ export function HierarchyPanel() {
     dispatch({ type: 'select', id: element.id });
     setRenamingId(element.id);
     setRenameValue(element.name);
+  };
+
+  const duplicateContextSelection = () => {
+    if (contextSelectionIds.length === 0) {
+      return;
+    }
+
+    dispatch({ type: 'duplicate-elements', ids: contextSelectionIds });
+    setContextMenu(null);
   };
 
   const getCreatedElementBase = (type: ElementType, name: string): RuntimeElement => {
@@ -341,27 +356,31 @@ export function HierarchyPanel() {
               </>
             ) : (
               <>
+                <button type="button" disabled={contextSelectionIds.length === 0} onClick={duplicateContextSelection}>
+                  <Copy size={14} />
+                  复制
+                </button>
                 <button
                   type="button"
-                  disabled={state.selectedElementIds.length !== 1}
-                  onClick={() => startRename(contextMenu.elementId)}
+                  disabled={contextSelectionIds.length !== 1}
+                  onClick={() => startRename(contextSelectionIds[0])}
                 >
                   <Edit3 size={14} />
-                  Rename
+                  重命名
                 </button>
                 <button type="button" disabled={!contextElement?.sourceAsset} onClick={applyToSource}>
-                  Apply to Source Asset
+                  应用到源资源
                 </button>
                 <button
                   className="danger-menu-item"
                   type="button"
                   onClick={() => {
-                    dispatch({ type: 'delete-elements', ids: state.selectedElementIds.length ? state.selectedElementIds : [contextMenu.elementId] });
+                    dispatch({ type: 'delete-elements', ids: contextSelectionIds.length ? contextSelectionIds : [contextMenu.elementId] });
                     setContextMenu(null);
                   }}
                 >
                   <Trash2 size={14} />
-                  Delete Object
+                  删除对象
                 </button>
               </>
             )}

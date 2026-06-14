@@ -4,6 +4,8 @@ This folder is the WebApp Editor framework, not an individual app project.
 
 Keep this framework root clean. Do not create `.log`, `.tmp`, `.pid`, scratch output, screenshots, generated reports, or one-off diagnostic files in this directory. Use the OS temp directory for diagnostics, or an explicit external artifact path requested by the user.
 
+Text files are UTF-8. On Windows PowerShell, always read non-ASCII files with `Get-Content -Encoding UTF8` or use `rg`; the default `Get-Content` decoding can display Chinese UI strings as mojibake. Do not replace Chinese text from a garbled PowerShell view.
+
 After cloning this repository, run:
 
 ```powershell

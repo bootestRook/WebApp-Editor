@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { FolderOpen, Plus } from 'lucide-react';
 import { ConsolePanel } from './panels/ConsolePanel';
 import { DockableWorkspace, type EditorLayoutPresetRequest, type EditorLayoutPresetSaveRequest } from './DockableWorkspace';
 import { GameView } from './panels/GameView';
 import { HierarchyPanel } from './panels/HierarchyPanel';
 import { InspectorPanel } from './panels/InspectorPanel';
+import { NewProjectDialog } from './panels/NewProjectDialog';
 import { ProjectPanel } from './panels/ProjectPanel';
 import { SceneView } from './panels/SceneView';
-import { Toolbar } from './panels/Toolbar';
-import { loadAssets, loadProject, openProject, type OpenProjectResult } from './services/projectService';
+import { Toolbar, type ToolbarHandle } from './panels/Toolbar';
+import { browseProjectParentFolder, createProject, loadAssets, loadProject, openProject, type OpenProjectResult } from './services/projectService';
 import { loadLayout, saveLayout } from './services/layoutService';
 import { useEditorStore } from './store/editorStore';
 import './editor.css';
@@ -39,11 +41,36 @@ function getAcceleratedNudgeStep(startedAt: number) {
   return Math.min(MAX_NUDGE_STEP, 1 + Math.floor(progress * (MAX_NUDGE_STEP - 1)));
 }
 
+function ProjectStart({ onNewProject, onOpenProject }: { onNewProject: () => void; onOpenProject: () => void }) {
+  return (
+    <div className="project-start-overlay">
+      <div className="project-start">
+        <div>
+          <h1>WebApp Editor</h1>
+          <p>No project is open.</p>
+        </div>
+        <div className="project-start-actions">
+          <button className="primary-button" type="button" onClick={onNewProject}>
+            <Plus size={17} />
+            <span>New Project</span>
+          </button>
+          <button type="button" onClick={onOpenProject}>
+            <FolderOpen size={17} />
+            <span>Open Project</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function EditorApp() {
   const { state, dispatch } = useEditorStore();
   const [editorLayoutSaveRequest, setEditorLayoutSaveRequest] = useState(0);
   const [editorLayoutPresetRequest, setEditorLayoutPresetRequest] = useState<EditorLayoutPresetRequest | null>(null);
   const [editorLayoutPresetSaveRequest, setEditorLayoutPresetSaveRequest] = useState<EditorLayoutPresetSaveRequest | null>(null);
+  const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
+  const toolbarRef = useRef<ToolbarHandle | null>(null);
   const stateRef = useRef(state);
   const handleSaveRef = useRef<(() => Promise<void>) | null>(null);
   const nudgeRef = useRef<{
@@ -80,6 +107,40 @@ export function EditorApp() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const handleOpenProject = useCallback(async (projectPath?: string): Promise<OpenProjectResult | null> => {
+    try {
+      const result = await openProject(projectPath);
+      if (result.cancelled) {
+        dispatch({ type: 'log', message: 'Open Project cancelled' });
+        return result;
+      }
+      dispatch({ type: 'log', message: `Opened ${result.projectName ?? 'project'}` });
+      toolbarRef.current?.rememberProject(result);
+      void reload();
+      return result;
+    } catch (error) {
+      dispatch({
+        type: 'log',
+        message: error instanceof Error ? error.message : 'Failed to open project'
+      });
+      return null;
+    }
+  }, [dispatch, reload]);
+
+  const handleCreateProject = useCallback(async (targetPath: string, projectName: string) => {
+    try {
+      const result = await createProject(targetPath, projectName);
+      dispatch({ type: 'log', message: `Created and opened project: ${result.projectPath ?? targetPath}` });
+      toolbarRef.current?.rememberProject(result);
+      await reload();
+      setNewProjectDialogOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create project';
+      dispatch({ type: 'log', message });
+      throw new Error(message);
+    }
+  }, [dispatch, reload]);
 
   const handleSave = useCallback(async () => {
     if (!state.layout || import.meta.env.PROD) {
@@ -195,6 +256,17 @@ export function EditorApp() {
         return;
       }
 
+      if (
+        key === 'd' &&
+        currentState.activeSelectionScope === 'elements' &&
+        currentState.selectedElementIds.length > 0 &&
+        !isEditingText(event.target)
+      ) {
+        event.preventDefault();
+        dispatch({ type: 'duplicate-elements', ids: currentState.selectedElementIds });
+        return;
+      }
+
       if (key === 'z' && event.shiftKey) {
         event.preventDefault();
         dispatch({ type: 'redo' });
@@ -238,32 +310,14 @@ export function EditorApp() {
   return (
     <div className="editor-shell">
       <Toolbar
+        ref={toolbarRef}
         dirty={state.dirty}
         loading={state.loading}
         saving={state.saving}
         canRedo={state.historyFuture.length > 0}
         canUndo={state.historyPast.length > 0}
-        onNewProject={() =>
-          dispatch({ type: 'log', message: 'Use npm run new-project -- <folder> to create a project folder, then npm run dev:project -- <folder> to open it.' })
-        }
-        onOpenProject={async (projectPath?: string): Promise<OpenProjectResult | null> => {
-            try {
-              const result = await openProject(projectPath);
-              if (result.cancelled) {
-                dispatch({ type: 'log', message: 'Open Project cancelled' });
-                return result;
-              }
-              dispatch({ type: 'log', message: `Opened ${result.projectName ?? 'project'}` });
-              void reload();
-              return result;
-            } catch (error) {
-              dispatch({
-                type: 'log',
-                message: error instanceof Error ? error.message : 'Failed to open project'
-              });
-              return null;
-            }
-        }}
+        onNewProject={() => setNewProjectDialogOpen(true)}
+        onOpenProject={handleOpenProject}
         onSaveEditorLayout={() => setEditorLayoutSaveRequest((request) => request + 1)}
         onSelectEditorLayoutPreset={(presetId) =>
           setEditorLayoutPresetRequest({
@@ -300,6 +354,21 @@ export function EditorApp() {
           console: <ConsolePanel />
         }}
       />
+      {!state.project && !state.loading ? (
+        <ProjectStart
+          onNewProject={() => setNewProjectDialogOpen(true)}
+          onOpenProject={() => {
+            void handleOpenProject();
+          }}
+        />
+      ) : null}
+      {newProjectDialogOpen ? (
+        <NewProjectDialog
+          onCancel={() => setNewProjectDialogOpen(false)}
+          onCreate={handleCreateProject}
+          onBrowseParentFolder={browseProjectParentFolder}
+        />
+      ) : null}
     </div>
   );
 }

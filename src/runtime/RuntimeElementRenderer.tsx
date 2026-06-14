@@ -33,6 +33,8 @@ export function RuntimeElementRenderer({ element, assetBaseUrl, interactive, sel
     width: element.width,
     height: element.height,
     overflow: 'hidden',
+    transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined,
+    transformOrigin: 'center center',
     userSelect: 'none',
     pointerEvents: interactive ? 'auto' : 'none'
   };

@@ -6,8 +6,8 @@ export type ResolutionPreset = {
 };
 
 export const BUILTIN_RESOLUTION_PRESETS: ResolutionPreset[] = [
-  { id: 'landscape-qhd', name: 'QHD Landscape', width: 2560, height: 1440 },
   { id: 'landscape-fhd', name: 'FHD Landscape', width: 1920, height: 1080 },
+  { id: 'landscape-qhd', name: 'QHD Landscape', width: 2560, height: 1440 },
   { id: 'landscape-hd', name: 'HD Landscape', width: 1280, height: 720 },
   { id: 'tablet-landscape', name: 'Tablet Landscape', width: 1366, height: 1024 },
   { id: 'mobile-landscape', name: 'Mobile Landscape', width: 2340, height: 1080 },
@@ -17,6 +17,19 @@ export const BUILTIN_RESOLUTION_PRESETS: ResolutionPreset[] = [
 ];
 
 const STORAGE_KEY = 'webapp-editor:resolution-presets:v1';
+
+export function getResolutionPresetBySize(width: number, height: number) {
+  return BUILTIN_RESOLUTION_PRESETS.find((preset) => preset.width === width && preset.height === height);
+}
+
+export function createResolutionPresetFromSize(width: number, height: number): ResolutionPreset {
+  return getResolutionPresetBySize(width, height) ?? {
+    id: `project-${width}x${height}`,
+    name: `${width} x ${height}`,
+    width,
+    height
+  };
+}
 
 export function loadCustomResolutionPresets() {
   try {

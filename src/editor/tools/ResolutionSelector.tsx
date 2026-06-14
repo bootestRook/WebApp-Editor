@@ -10,13 +10,14 @@ import {
 type Props = {
   value: ResolutionPreset;
   onChange: (preset: ResolutionPreset) => void;
+  allowCustom?: boolean;
 };
 
 function toPositiveInt(value: string) {
   return Math.max(1, Math.round(Number(value) || 1));
 }
 
-export function ResolutionSelector({ value, onChange }: Props) {
+export function ResolutionSelector({ value, onChange, allowCustom = true }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [customPresets, setCustomPresets] = useState<ResolutionPreset[]>(() => loadCustomResolutionPresets());
   const [showCustomForm, setShowCustomForm] = useState(false);
@@ -87,7 +88,7 @@ export function ResolutionSelector({ value, onChange }: Props) {
             {preset.name} ({preset.width} x {preset.height})
           </option>
         ))}
-        <option value="__custom">Add custom...</option>
+        {allowCustom ? <option value="__custom">Add custom...</option> : null}
       </select>
       <span>@ {Math.round(value.width)} x {Math.round(value.height)}</span>
       {showCustomForm ? (

@@ -32,8 +32,8 @@ my-project/
   "version": 1,
   "name": "My WebApp",
   "baseResolution": {
-    "width": 2560,
-    "height": 1440
+    "width": 1920,
+    "height": 1080
   },
   "entryLayout": "layouts/main_page.layout.json",
   "assetsRoot": "assets"
@@ -41,6 +41,8 @@ my-project/
 ```
 
 Paths are normalized project-relative paths. Use `/`, never `\`, absolute paths, `.` segments, or `..` segments.
+
+The default project base resolution is `1920x1080`. The editor can switch the project base resolution in Project settings to one of the built-in supported sizes: `1920x1080`, `2560x1440`, `1280x720`, `1366x1024`, `2340x1080`, `1080x1920`, `1080x2340`, or `1024x1366`.
 
 ## Layouts
 
@@ -51,8 +53,8 @@ Layouts are scene documents. The editor and runtime both consume the same layout
   "id": "main_page",
   "name": "Main Page",
   "baseResolution": {
-    "width": 2560,
-    "height": 1440
+    "width": 1920,
+    "height": 1080
   },
   "elements": []
 }
@@ -66,6 +68,8 @@ Supported element types are currently:
 - `image`
 
 Each element needs a stable unique `id`, `type`, `name`, `x`, `y`, `width`, and `height`. Element IDs must start with a letter and can contain letters, numbers, `_`, or `-`.
+
+Elements may set `rotation` as a number of degrees around the element center. `0` or an omitted value means no rotation; positive values rotate clockwise.
 
 ## Styles
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Check, ChevronDown, FolderOpen, LayoutPanelTop, Plus, Redo2, RefreshCw, Save, Search, Undo2, X } from 'lucide-react';
 import type { OpenProjectResult } from '../services/projectService';
 
@@ -37,6 +37,10 @@ type Props = {
   onRedo: () => void;
   onReload: () => void;
   onSave: () => void;
+};
+
+export type ToolbarHandle = {
+  rememberProject: (result: OpenProjectResult | null) => void;
 };
 
 function loadRecentProjects() {
@@ -110,7 +114,7 @@ function loadCustomLayoutPresetSummaries() {
   }
 }
 
-export function Toolbar({
+export const Toolbar = forwardRef<ToolbarHandle, Props>(function Toolbar({
   dirty,
   saving,
   loading,
@@ -125,7 +129,7 @@ export function Toolbar({
   onRedo,
   onReload,
   onSave
-}: Props) {
+}: Props, ref) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const layoutMenuRef = useRef<HTMLDivElement | null>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -210,15 +214,19 @@ export function Toolbar({
     setNewPresetDialogOpen(false);
   };
 
-  const rememberProject = (result: OpenProjectResult | null) => {
+  const rememberProject = useCallback((result: OpenProjectResult | null) => {
     if (!result || result.cancelled || !result.projectPath) {
       return;
     }
 
-    const nextProjects = upsertRecentProject(recentProjects, result);
-    setRecentProjects(nextProjects);
-    saveRecentProjects(nextProjects);
-  };
+    setRecentProjects((currentProjects) => {
+      const nextProjects = upsertRecentProject(currentProjects, result);
+      saveRecentProjects(nextProjects);
+      return nextProjects;
+    });
+  }, []);
+
+  useImperativeHandle(ref, () => ({ rememberProject }), [rememberProject]);
 
   const openProjectFromManager = async (projectPath?: string) => {
     setOpeningProjectPath(projectPath ?? '__browse__');
@@ -414,4 +422,4 @@ export function Toolbar({
       ) : null}
     </header>
   );
-}
+});

@@ -1,4 +1,5 @@
-import type { ProjectAsset, RuntimeElement, WebAppProject } from '../../runtime/runtimeTypes';
+import type { ProjectAsset, RuntimeElement, WebAppLayout, WebAppProject } from '../../runtime/runtimeTypes';
+import { parseLayoutSchema } from '../../shared/schema/layoutSchema';
 import { parseProjectSchema } from '../../shared/schema/projectSchema';
 
 type AssetsResponse = {
@@ -10,6 +11,19 @@ export type OpenProjectResult = {
   projectName?: string;
   projectPath?: string;
 };
+
+async function readEditorApiError(response: Response, fallback: string) {
+  try {
+    const data = (await response.json()) as { error?: unknown };
+    if (typeof data.error === 'string' && data.error.trim()) {
+      return data.error;
+    }
+  } catch {
+    // Fall through to the status-based message.
+  }
+
+  return `${fallback}: ${response.status}`;
+}
 
 export async function loadProject(): Promise<WebAppProject> {
   const response = await fetch('/__webapp_editor/project');
@@ -68,7 +82,7 @@ export async function openProject(projectPath?: string): Promise<OpenProjectResu
     body: projectPath ? JSON.stringify({ path: projectPath }) : undefined
   });
   if (!response.ok) {
-    throw new Error(`Failed to open project: ${response.status}`);
+    throw new Error(await readEditorApiError(response, 'Failed to open project'));
   }
 
   const data = (await response.json()) as { cancelled?: boolean; projectName?: string; target?: string };
@@ -77,6 +91,65 @@ export async function openProject(projectPath?: string): Promise<OpenProjectResu
     projectName: data.projectName,
     projectPath: data.target
   };
+}
+
+export async function createProject(targetPath: string, projectName?: string): Promise<OpenProjectResult> {
+  const response = await fetch('/__webapp_editor/create-project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetPath, projectName })
+  });
+  if (!response.ok) {
+    throw new Error(await readEditorApiError(response, 'Failed to create project'));
+  }
+
+  const data = (await response.json()) as { ok?: boolean; error?: string; projectName?: string; target?: string };
+  if (!data.ok) {
+    throw new Error(data.error || 'Failed to create project');
+  }
+
+  return {
+    cancelled: false,
+    projectName: data.projectName ?? projectName,
+    projectPath: data.target
+  };
+}
+
+export async function saveProjectSettings(settings: {
+  baseResolution: WebAppProject['baseResolution'];
+}): Promise<{ project: WebAppProject; layout: WebAppLayout }> {
+  const response = await fetch('/__webapp_editor/save-project-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings)
+  });
+  if (!response.ok) {
+    throw new Error(await readEditorApiError(response, 'Failed to save project settings'));
+  }
+
+  const data = (await response.json()) as { project?: unknown; layout?: unknown };
+  return {
+    project: parseProjectSchema(data.project),
+    layout: parseLayoutSchema(data.layout) as WebAppLayout
+  };
+}
+
+export async function browseProjectParentFolder(initialPath?: string): Promise<string | null> {
+  const response = await fetch('/__webapp_editor/browse-project-parent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ initialPath })
+  });
+  if (!response.ok) {
+    throw new Error(await readEditorApiError(response, 'Failed to browse parent folder'));
+  }
+
+  const data = (await response.json()) as { ok?: boolean; cancelled?: boolean; error?: string; path?: string };
+  if (!data.ok) {
+    throw new Error(data.error || 'Failed to browse parent folder');
+  }
+
+  return data.cancelled ? null : (data.path ?? null);
 }
 
 export async function deleteAsset(path: string): Promise<void> {

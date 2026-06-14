@@ -8,7 +8,12 @@ import { defineConfig, type Plugin } from 'vite';
 import { parseRuntimeElementSchema, parseLayoutSchema } from './src/shared/schema/layoutSchema';
 import { parseProjectSchema } from './src/shared/schema/projectSchema';
 import { parseComponentAssetSchema } from './src/shared/schema/componentSchema';
-import { PROJECT_FILE_NAME, WEBAPP_PROJECT_VERSION } from './src/shared/schema/projectContract';
+import {
+  formatSupportedBaseResolutions,
+  isSupportedBaseResolution,
+  PROJECT_FILE_NAME,
+  WEBAPP_PROJECT_VERSION
+} from './src/shared/schema/projectContract';
 
 declare global {
   interface Worker {}
@@ -24,7 +29,9 @@ const editorLocalDir = path.resolve(
     path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'WebApp Editor')
 );
 const editorLayoutFile = path.join(editorLocalDir, 'editor-layout.json');
+const editorActiveProjectFile = path.join(editorLocalDir, 'active-project.json');
 const buildOutDir = path.resolve(process.env.WEBAPP_EDITOR_BUILD_DIR ?? path.join(__dirname, '.webapp-editor-build'));
+let activeProjectHydrated = configuredProjectDir !== null;
 
 type ProjectFileEntry = {
   name: string;
@@ -32,6 +39,8 @@ type ProjectFileEntry = {
   assetPath?: string;
   url: string;
   size: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
   kind: string;
 };
 
@@ -58,6 +67,60 @@ function escapePowerShellString(value: string) {
   return value.replaceAll("'", "''");
 }
 
+function isFilesystemRoot(dir: string) {
+  const resolvedDir = path.resolve(dir);
+  const rootDir = path.resolve(path.parse(resolvedDir).root);
+  return resolvedDir === rootDir;
+}
+
+function validateExternalProjectTarget(targetPath: unknown) {
+  if (typeof targetPath !== 'string' || targetPath.trim().length === 0) {
+    throw new Error('targetPath is required');
+  }
+
+  if (!path.isAbsolute(targetPath)) {
+    throw new Error('targetPath must be an absolute path');
+  }
+
+  const frameworkRoot = path.resolve(__dirname);
+  const resolvedTarget = path.resolve(targetPath);
+  if (isInside(frameworkRoot, resolvedTarget)) {
+    throw new Error('New projects must be created outside the WebApp-Editor framework folder');
+  }
+
+  if (isFilesystemRoot(resolvedTarget)) {
+    throw new Error('targetPath cannot be a filesystem root');
+  }
+
+  return resolvedTarget;
+}
+
+function runInitProject(targetPath: string, projectName?: string) {
+  const scriptPath = path.join(__dirname, 'scripts', 'init-project.mjs');
+  return new Promise<void>((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [scriptPath, targetPath],
+      {
+        cwd: __dirname,
+        env: {
+          ...process.env,
+          ...(projectName ? { WEBAPP_PROJECT_NAME: projectName } : {})
+        },
+        windowsHide: true
+      },
+      (error, _stdout, stderr) => {
+        if (error) {
+          const detail = stderr.trim() || error.message;
+          reject(new Error(detail));
+          return;
+        }
+        resolve();
+      }
+    );
+  });
+}
+
 function requireActiveProjectDir() {
   if (!activeProjectDir) {
     throw new Error('No WebApp project is open. Use npm run dev:project -- <project-folder> or Open Project.');
@@ -78,6 +141,76 @@ async function readProjectMetadata(projectRoot = activeProjectDir) {
     raw,
     project
   };
+}
+
+async function fileExists(filePath: string) {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function parseBaseResolutionSetting(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    throw new Error(`baseResolution must be one of ${formatSupportedBaseResolutions()}`);
+  }
+
+  const resolution = value as { width?: unknown; height?: unknown };
+  if (typeof resolution.width !== 'number' || typeof resolution.height !== 'number') {
+    throw new Error(`baseResolution must be one of ${formatSupportedBaseResolutions()}`);
+  }
+
+  const next = {
+    width: Math.round(resolution.width),
+    height: Math.round(resolution.height)
+  };
+  if (!isSupportedBaseResolution(next)) {
+    throw new Error(`baseResolution must be one of ${formatSupportedBaseResolutions()}`);
+  }
+
+  return next;
+}
+
+async function walkJsonFiles(root: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await walkJsonFiles(fullPath)));
+    } else if (entry.isFile() && path.extname(fullPath).toLowerCase() === '.json') {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+async function resolveProjectRootCandidate(candidateDir: string) {
+  const resolvedDir = path.resolve(candidateDir);
+  if (await fileExists(path.join(resolvedDir, PROJECT_FILE_NAME))) {
+    return resolvedDir;
+  }
+
+  const nestedWebappDir = path.join(resolvedDir, 'webapp');
+  if (await fileExists(path.join(nestedWebappDir, PROJECT_FILE_NAME))) {
+    return nestedWebappDir;
+  }
+
+  throw new Error(`Missing ${PROJECT_FILE_NAME}: ${path.join(resolvedDir, PROJECT_FILE_NAME)}`);
 }
 
 async function getActiveLayoutFile() {
@@ -130,7 +263,7 @@ async function getActiveAssetsDir() {
 }
 
 async function validateProjectRoot(candidateDir: string) {
-  const resolvedDir = path.resolve(candidateDir);
+  const resolvedDir = await resolveProjectRootCandidate(candidateDir);
   const { project } = await readProjectMetadata(resolvedDir);
   const layoutFile = path.resolve(resolvedDir, project.entryLayout);
   const assetsDir = path.resolve(resolvedDir, project.assetsRoot);
@@ -148,12 +281,44 @@ async function validateProjectRoot(candidateDir: string) {
   return resolvedDir;
 }
 
-function pickProjectDirectory() {
-  const selectedPath = activeProjectDir ?? process.cwd();
+async function persistActiveProjectDir(projectDir: string) {
+  await fs.mkdir(editorLocalDir, { recursive: true });
+  await fs.writeFile(
+    editorActiveProjectFile,
+    `${JSON.stringify({ projectDir, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    'utf8'
+  );
+}
+
+async function hydrateActiveProjectDir() {
+  if (activeProjectHydrated || activeProjectDir) {
+    return;
+  }
+
+  activeProjectHydrated = true;
+  try {
+    const raw = await fs.readFile(editorActiveProjectFile, 'utf8');
+    const parsed = JSON.parse(raw) as { projectDir?: unknown };
+    if (typeof parsed.projectDir !== 'string' || !path.isAbsolute(parsed.projectDir)) {
+      return;
+    }
+
+    activeProjectDir = await validateProjectRoot(parsed.projectDir);
+    activeLayoutPath = null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+    activeProjectDir = null;
+    activeLayoutPath = null;
+  }
+}
+
+function pickDirectory(description: string, selectedPath: string) {
   const script = [
     'Add-Type -AssemblyName System.Windows.Forms',
     '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
-    "$dialog.Description = 'Select WebApp project folder'",
+    `$dialog.Description = '${escapePowerShellString(description)}'`,
     `$dialog.SelectedPath = '${escapePowerShellString(selectedPath)}'`,
     '$result = $dialog.ShowDialog()',
     'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }'
@@ -169,6 +334,20 @@ function pickProjectDirectory() {
       resolve(selected || null);
     });
   });
+}
+
+function pickProjectDirectory() {
+  return pickDirectory('Select WebApp project folder', activeProjectDir ?? process.cwd());
+}
+
+function pickProjectParentDirectory(initialPath?: unknown) {
+  const selectedPath =
+    typeof initialPath === 'string' && initialPath.trim()
+      ? path.resolve(initialPath)
+      : activeProjectDir
+        ? path.dirname(activeProjectDir)
+        : process.cwd();
+  return pickDirectory('Select parent folder for the new WebApp project', selectedPath);
 }
 
 function getAssetKind(filePath: string) {
@@ -193,6 +372,93 @@ function getAssetKind(filePath: string) {
     return 'effect';
   }
   return 'unknown';
+}
+
+function readSvgLength(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)/);
+  return match ? Math.round(Number(match[1])) : null;
+}
+
+async function getImageNaturalSize(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase();
+  try {
+    const data = await fs.readFile(filePath);
+    if (ext === '.png' && data.length >= 24 && data.toString('ascii', 1, 4) === 'PNG') {
+      return {
+        naturalWidth: data.readUInt32BE(16),
+        naturalHeight: data.readUInt32BE(20)
+      };
+    }
+
+    if ((ext === '.jpg' || ext === '.jpeg') && data.length > 4) {
+      let offset = 2;
+      while (offset < data.length - 9) {
+        if (data[offset] !== 0xff) {
+          offset += 1;
+          continue;
+        }
+
+        const marker = data[offset + 1];
+        const length = data.readUInt16BE(offset + 2);
+        if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+          return {
+            naturalWidth: data.readUInt16BE(offset + 7),
+            naturalHeight: data.readUInt16BE(offset + 5)
+          };
+        }
+        offset += 2 + length;
+      }
+    }
+
+    if (ext === '.webp' && data.length >= 30 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP') {
+      const chunk = data.toString('ascii', 12, 16);
+      if (chunk === 'VP8X' && data.length >= 30) {
+        return {
+          naturalWidth: 1 + data.readUIntLE(24, 3),
+          naturalHeight: 1 + data.readUIntLE(27, 3)
+        };
+      }
+      if (chunk === 'VP8 ' && data.length >= 30) {
+        return {
+          naturalWidth: data.readUInt16LE(26) & 0x3fff,
+          naturalHeight: data.readUInt16LE(28) & 0x3fff
+        };
+      }
+      if (chunk === 'VP8L' && data.length >= 25) {
+        const bits = data.readUInt32LE(21);
+        return {
+          naturalWidth: (bits & 0x3fff) + 1,
+          naturalHeight: ((bits >> 14) & 0x3fff) + 1
+        };
+      }
+    }
+
+    if (ext === '.svg') {
+      const text = data.toString('utf8', 0, Math.min(data.length, 2048));
+      const svgTag = text.match(/<svg\b[^>]*>/i)?.[0] ?? '';
+      const width = readSvgLength(svgTag.match(/\bwidth=["']([^"']+)["']/i)?.[1]);
+      const height = readSvgLength(svgTag.match(/\bheight=["']([^"']+)["']/i)?.[1]);
+      if (width && height) {
+        return { naturalWidth: width, naturalHeight: height };
+      }
+
+      const viewBox = svgTag.match(/\bviewBox=["']([^"']+)["']/i)?.[1]?.trim().split(/[\s,]+/).map(Number);
+      if (viewBox && viewBox.length === 4 && viewBox.every(Number.isFinite)) {
+        return {
+          naturalWidth: Math.round(viewBox[2]),
+          naturalHeight: Math.round(viewBox[3])
+        };
+      }
+    }
+  } catch {
+    return {};
+  }
+
+  return {};
 }
 
 async function listAssets(dir: string, prefix = ''): Promise<Array<{ name: string; path: string; url: string; size: number; kind: string }>> {
@@ -319,6 +585,8 @@ async function listProjectFiles(
         ? path.relative(activeAssetsDir, fullPath).replaceAll('\\', '/')
         : undefined;
       const isLayoutFile = projectPath.startsWith('layouts/') && path.extname(fullPath).toLowerCase() === '.json';
+      const kind = isLayoutFile ? 'layout' : getAssetKind(fullPath);
+      const imageSize = kind === 'image' ? await getImageNaturalSize(fullPath) : {};
       return [
         {
           name: entry.name,
@@ -326,7 +594,8 @@ async function listProjectFiles(
           assetPath,
           url: assetPath ? `/__webapp_editor/assets/${assetPath}` : '',
           size: stat.size,
-          kind: isLayoutFile ? 'layout' : getAssetKind(fullPath)
+          ...imageSize,
+          kind
         }
       ];
     })
@@ -344,6 +613,8 @@ function devEditorApi(): Plugin {
         const url = req.url?.split('?')[0] ?? '';
 
         try {
+          await hydrateActiveProjectDir();
+
           if (req.method === 'GET' && url === '/__webapp_editor/editor-layout') {
             try {
               const data = await fs.readFile(editorLayoutFile, 'utf8');
@@ -369,8 +640,42 @@ function devEditorApi(): Plugin {
 
           if (req.method === 'GET' && url === '/__webapp_editor/project') {
             const { raw } = await readProjectMetadata();
+            await persistActiveProjectDir(requireActiveProjectDir());
             res.setHeader('Content-Type', 'application/json');
             res.end(raw);
+            return;
+          }
+
+          if (req.method === 'POST' && url === '/__webapp_editor/save-project-settings') {
+            const projectDir = requireActiveProjectDir();
+            const body = JSON.parse(await readRequestBody(req)) as { baseResolution?: unknown };
+            const baseResolution = parseBaseResolutionSetting(body.baseResolution);
+            const projectFile = path.join(projectDir, PROJECT_FILE_NAME);
+            const projectJson = JSON.parse(await fs.readFile(projectFile, 'utf8')) as Record<string, unknown>;
+            projectJson.baseResolution = baseResolution;
+            const project = parseProjectSchema(projectJson);
+            await fs.writeFile(projectFile, `${JSON.stringify(projectJson, null, 2)}\n`, 'utf8');
+
+            // 项目基准分辨率是跨 layout 的协议约束，保存设置时统一同步所有页面声明。
+            const layoutFiles = new Set(await walkJsonFiles(path.join(projectDir, 'layouts')));
+            const entryLayoutFile = path.resolve(projectDir, project.entryLayout);
+            if (isInside(projectDir, entryLayoutFile)) {
+              layoutFiles.add(entryLayoutFile);
+            }
+
+            for (const layoutFile of layoutFiles) {
+              if (!isInside(projectDir, layoutFile)) {
+                continue;
+              }
+              const layoutJson = JSON.parse(await fs.readFile(layoutFile, 'utf8')) as Record<string, unknown>;
+              layoutJson.baseResolution = baseResolution;
+              const layout = parseLayoutSchema(layoutJson);
+              await fs.writeFile(layoutFile, `${JSON.stringify(layout, null, 2)}\n`, 'utf8');
+            }
+
+            const activeLayoutFile = await getActiveLayoutFile();
+            const activeLayout = parseLayoutSchema(JSON.parse(await fs.readFile(activeLayoutFile, 'utf8')));
+            await sendJson(res, { ok: true, project, layout: activeLayout });
             return;
           }
 
@@ -488,8 +793,84 @@ function devEditorApi(): Plugin {
 
             activeProjectDir = await validateProjectRoot(selectedDir);
             activeLayoutPath = null;
+            await persistActiveProjectDir(activeProjectDir);
             const { project } = await readProjectMetadata();
             await sendJson(res, { ok: true, cancelled: false, target: activeProjectDir, projectName: project.name });
+            return;
+          }
+
+          if (req.method === 'POST' && url === '/__webapp_editor/browse-project-parent') {
+            const bodyText = await readRequestBody(req);
+            const body = bodyText ? (JSON.parse(bodyText) as { initialPath?: unknown }) : {};
+            const selectedDir = await pickProjectParentDirectory(body.initialPath);
+            if (!selectedDir) {
+              await sendJson(res, { ok: true, cancelled: true });
+              return;
+            }
+
+            const frameworkRoot = path.resolve(__dirname);
+            const selectedParent = path.resolve(selectedDir);
+            if (isInside(frameworkRoot, selectedParent)) {
+              await sendJson(res, { ok: false, error: 'New projects must be created outside the WebApp-Editor framework folder' }, 400);
+              return;
+            }
+
+            await sendJson(res, { ok: true, cancelled: false, path: selectedParent });
+            return;
+          }
+
+          if (req.method === 'POST' && url === '/__webapp_editor/create-project') {
+            try {
+              const body = JSON.parse(await readRequestBody(req)) as { targetPath?: unknown; projectName?: unknown };
+              if (body.projectName !== undefined && typeof body.projectName !== 'string') {
+                await sendJson(res, { ok: false, error: 'projectName must be a string when provided' }, 400);
+                return;
+              }
+
+              const target = validateExternalProjectTarget(body.targetPath);
+              try {
+                const targetStat = await fs.stat(target);
+                if (!targetStat.isDirectory()) {
+                  await sendJson(res, { ok: false, error: 'targetPath must be a directory or a new folder path' }, 400);
+                  return;
+                }
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                  throw error;
+                }
+              }
+
+              try {
+                await fs.stat(path.join(target, PROJECT_FILE_NAME));
+                await sendJson(res, { ok: false, error: `${PROJECT_FILE_NAME} already exists at targetPath` }, 409);
+                return;
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                  throw error;
+                }
+              }
+
+              const projectName = typeof body.projectName === 'string' ? body.projectName.trim() : '';
+              await runInitProject(target, projectName || undefined);
+              activeProjectDir = await validateProjectRoot(target);
+              activeLayoutPath = null;
+              await persistActiveProjectDir(activeProjectDir);
+              const { project } = await readProjectMetadata(activeProjectDir);
+              await sendJson(res, {
+                ok: true,
+                target: activeProjectDir,
+                projectName: project.name
+              });
+            } catch (error) {
+              await sendJson(
+                res,
+                {
+                  ok: false,
+                  error: error instanceof Error ? error.message : 'Failed to create project'
+                },
+                400
+              );
+            }
             return;
           }
 

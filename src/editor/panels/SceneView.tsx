@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type DragEvent, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent, type WheelEvent } from 'react';
 import { Grid3X3, Magnet, MousePointer2 } from 'lucide-react';
 import { RuntimeRenderer } from '../../runtime/RuntimeRenderer';
 import type { RuntimeElement } from '../../runtime/runtimeTypes';
@@ -6,11 +6,15 @@ import { useEditorStore } from '../store/editorStore';
 import { GridOverlay } from '../tools/GridOverlay';
 import { MoveableControls, type DragChangeOptions, type DragMode } from '../tools/MoveableControls';
 import { ResolutionSelector } from '../tools/ResolutionSelector';
-import { BUILTIN_RESOLUTION_PRESETS, type ResolutionPreset } from '../tools/resolutionPresets';
+import {
+  BUILTIN_RESOLUTION_PRESETS,
+  createResolutionPresetFromSize,
+  type ResolutionPreset
+} from '../tools/resolutionPresets';
 import { useViewportScale } from '../tools/useViewportScale';
 import { loadAssetDefaults, loadComponentAsset } from '../services/projectService';
 
-const RESOLUTION_STORAGE_KEY = 'webapp-editor:active-resolution:v1';
+const RESOLUTION_STORAGE_KEY = 'webapp-editor:active-resolution:v2';
 const EDGE_SNAP_STORAGE_KEY = 'webapp-editor:edge-snap:v1';
 const GRID_SNAP_STORAGE_KEY = 'webapp-editor:grid-snap:v1';
 const SNAP_THRESHOLD = 8;
@@ -338,6 +342,19 @@ export function SceneView() {
   const scale = clamp(fitScale * zoomMultiplier, 0.03, 4);
   const layoutDisplayName = getLayoutDisplayName(state.activeLayoutPath, state.layout?.name);
 
+  useEffect(() => {
+    if (!state.project) {
+      return;
+    }
+
+    const projectResolution = createResolutionPresetFromSize(
+      state.project.baseResolution.width,
+      state.project.baseResolution.height
+    );
+    setResolution(projectResolution);
+    saveActiveResolution(projectResolution);
+  }, [state.project?.baseResolution.height, state.project?.baseResolution.width]);
+
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     const zoomFactor = Math.exp(-event.deltaY * 0.0015);
@@ -435,7 +452,15 @@ export function SceneView() {
     }
 
     event.preventDefault();
-    const payload = JSON.parse(raw) as { asset?: { path: string; assetPath?: string; kind: string } };
+    const payload = JSON.parse(raw) as {
+      asset?: {
+        path: string;
+        assetPath?: string;
+        kind: string;
+        naturalWidth?: number;
+        naturalHeight?: number;
+      };
+    };
     const asset = payload.asset;
     if (!asset || (asset.kind !== 'image' && asset.kind !== 'component')) {
       dispatch({ type: 'log', message: 'Only image and component assets can be dropped into SceneView' });
@@ -480,8 +505,8 @@ export function SceneView() {
       }
     }
 
-    const defaultWidth = 256;
-    const defaultHeight = 256;
+    const defaultWidth = asset.naturalWidth ?? 256;
+    const defaultHeight = asset.naturalHeight ?? 256;
     let defaults: Partial<RuntimeElement> | null = null;
     try {
       defaults = await loadAssetDefaults(sourcePath);

@@ -119,7 +119,9 @@ export function MoveableControls({ element, scale, onChange, onBeginChange, onEn
         left: element.x,
         top: element.y,
         width: element.width,
-        height: element.height
+        height: element.height,
+        transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined,
+        transformOrigin: 'center center'
       }}
     >
       <div

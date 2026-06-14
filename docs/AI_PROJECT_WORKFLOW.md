@@ -32,6 +32,14 @@ Do not write logs, temp files, screenshots, or diagnostic output into the WebApp
 
 ## Create A Project
 
+Prefer creating app projects from the editor UI when the dev server is already open:
+
+```text
+File -> New Project
+```
+
+The project folder must still be outside the WebApp Editor framework checkout.
+
 From the WebApp Editor folder:
 
 ```powershell

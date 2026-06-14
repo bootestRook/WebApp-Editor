@@ -28,12 +28,14 @@ type EditorAction =
   | { type: 'load:success'; project: WebAppProject; layout: WebAppLayout; assets: ProjectAsset[] }
   | { type: 'load:error'; error: string }
   | { type: 'open-layout:success'; layout: WebAppLayout; path: string }
+  | { type: 'project-settings:success'; project: WebAppProject; layout: WebAppLayout }
   | { type: 'select'; id: string | null; mode?: 'replace' | 'toggle' | 'range'; orderedIds?: string[] }
   | { type: 'set-selection-scope'; scope: 'elements' | 'assets' }
   | { type: 'set-assets'; assets: ProjectAsset[] }
   | { type: 'begin-history-group'; label: string }
   | { type: 'end-history-group' }
   | { type: 'add-element'; element: RuntimeElement }
+  | { type: 'duplicate-elements'; ids: string[] }
   | { type: 'delete-elements'; ids: string[] }
   | { type: 'reorder-elements'; ids: string[]; targetId: string; position: 'before' | 'after' }
   | { type: 'update-element'; id: string; patch: Partial<RuntimeElement> }
@@ -107,6 +109,28 @@ function selectRange(anchorId: string | null, targetId: string, orderedIds: stri
   return orderedIds.slice(start, end + 1);
 }
 
+function getDuplicatedElementId(id: string, usedIds: Set<string>) {
+  const base = `${id}_copy`;
+  let candidate = base;
+  let index = 2;
+
+  while (usedIds.has(candidate)) {
+    candidate = `${base}_${index}`;
+    index += 1;
+  }
+
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function duplicateRuntimeElement(element: RuntimeElement, id: string): RuntimeElement {
+  return {
+    ...(JSON.parse(JSON.stringify(element)) as RuntimeElement),
+    id,
+    name: `${element.name} 副本`
+  };
+}
+
 function commitHistoryGroup(state: EditorState): EditorState {
   if (!state.historyActive || !state.layout) {
     return state;
@@ -175,6 +199,21 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         dirty: false,
         error: null,
         console: appendLog(state, `Opened layout ${action.path}`)
+      };
+    case 'project-settings:success':
+      return {
+        ...state,
+        project: action.project,
+        layout: action.layout,
+        historyPast: [],
+        historyFuture: [],
+        historyActive: null,
+        dirty: false,
+        error: null,
+        console: appendLog(
+          state,
+          `Updated project resolution to ${action.project.baseResolution.width}x${action.project.baseResolution.height}`
+        )
       };
     case 'select':
       if (!action.id) {
@@ -268,6 +307,48 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         },
         console: appendLog(state, `Created ${action.element.name}`)
       };
+    case 'duplicate-elements':
+      if (!state.layout || action.ids.length === 0) {
+        return state;
+      }
+
+      {
+        const sourceIds = uniqueIds(action.ids);
+        const sourceIdSet = new Set(sourceIds);
+        const sourceElements = state.layout.elements.filter((element) => sourceIdSet.has(element.id));
+
+        if (sourceElements.length === 0) {
+          return state;
+        }
+
+        const usedIds = new Set(state.layout.elements.map((element) => element.id));
+        const duplicatedElements = sourceElements.map((element) =>
+          duplicateRuntimeElement(element, getDuplicatedElementId(element.id, usedIds))
+        );
+        const insertIndex =
+          Math.max(...state.layout.elements.map((element, index) => (sourceIdSet.has(element.id) ? index : -1))) + 1;
+        const selectedElementIds = duplicatedElements.map((element) => element.id);
+
+        return {
+          ...state,
+          dirty: true,
+          historyPast: pushHistory(state),
+          historyFuture: [],
+          selectedElementId: selectedElementIds.at(-1) ?? null,
+          selectedElementIds,
+          selectionAnchorId: selectedElementIds[0] ?? null,
+          activeSelectionScope: 'elements',
+          layout: {
+            ...state.layout,
+            elements: [
+              ...state.layout.elements.slice(0, insertIndex),
+              ...duplicatedElements,
+              ...state.layout.elements.slice(insertIndex)
+            ]
+          },
+          console: appendLog(state, `复制了 ${duplicatedElements.length} 个对象`)
+        };
+      }
     case 'delete-elements':
       if (!state.layout || action.ids.length === 0) {
         return state;

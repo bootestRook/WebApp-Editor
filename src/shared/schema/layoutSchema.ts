@@ -1,5 +1,13 @@
 import type { RuntimeElement, RuntimeStyle, WebAppLayout } from '../../runtime/runtimeTypes';
-import { BASE_RESOLUTION, ELEMENT_TYPES, IMAGE_FIT_VALUES, TEXT_ALIGN_VALUES } from './projectContract';
+import {
+  BASE_RESOLUTION,
+  DEFAULT_ROTATION,
+  ELEMENT_TYPES,
+  formatSupportedBaseResolutions,
+  IMAGE_FIT_VALUES,
+  isSupportedBaseResolution,
+  TEXT_ALIGN_VALUES
+} from './projectContract';
 
 const elementTypes = new Set<string>(ELEMENT_TYPES);
 const textAlignValues = new Set<string>(TEXT_ALIGN_VALUES);
@@ -179,6 +187,7 @@ export function parseRuntimeElementSchema(value: unknown): RuntimeElement {
     y: Math.round(requireNumber(value, 'y')),
     width: Math.max(1, Math.round(requireNumber(value, 'width'))),
     height: Math.max(1, Math.round(requireNumber(value, 'height'))),
+    rotation: optionalRootNumber(value, 'rotation'),
     visible: typeof value.visible === 'boolean' ? value.visible : undefined,
     layerGroup: optionalRootString(value, 'layerGroup'),
     layerOrder: optionalRootNumber(value, 'layerOrder'),
@@ -205,11 +214,13 @@ export function parseRuntimeElementSchema(value: unknown): RuntimeElement {
 }
 
 export function normalizeLayout(layout: WebAppLayout): WebAppLayout {
+  const baseResolution = layout.baseResolution ?? BASE_RESOLUTION;
+
   return {
     ...layout,
     baseResolution: {
-      width: BASE_RESOLUTION.width,
-      height: BASE_RESOLUTION.height
+      width: Math.round(baseResolution.width),
+      height: Math.round(baseResolution.height)
     },
     elements: layout.elements.map((element) => ({
       ...element,
@@ -217,6 +228,7 @@ export function normalizeLayout(layout: WebAppLayout): WebAppLayout {
       y: Math.round(element.y),
       width: Math.max(1, Math.round(element.width)),
       height: Math.max(1, Math.round(element.height)),
+      rotation: element.rotation === undefined || element.rotation === DEFAULT_ROTATION ? undefined : Math.round(element.rotation),
       layerOrder: element.layerOrder === undefined ? undefined : Math.round(element.layerOrder),
       orderInLayer: element.orderInLayer === undefined ? undefined : Math.round(element.orderInLayer)
     }))
@@ -256,11 +268,8 @@ export function parseLayoutSchema(value: unknown): WebAppLayout {
     ids.add(element.id);
   }
 
-  if (
-    layout.baseResolution.width !== BASE_RESOLUTION.width ||
-    layout.baseResolution.height !== BASE_RESOLUTION.height
-  ) {
-    throw new Error(`layout: baseResolution must be ${BASE_RESOLUTION.width}x${BASE_RESOLUTION.height}`);
+  if (!isSupportedBaseResolution(layout.baseResolution)) {
+    throw new Error(`layout: baseResolution must be one of ${formatSupportedBaseResolutions()}`);
   }
 
   return normalizeLayout(layout);

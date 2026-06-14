@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findSuspiciousText } from './text-encoding-guard.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const editorRoot = path.resolve(scriptDir, '..');
@@ -80,12 +81,33 @@ function readBaseResolution(source) {
   };
 }
 
+function readSupportedBaseResolutions(source, baseResolution) {
+  const match = source.match(/export const SUPPORTED_BASE_RESOLUTIONS = \[([\s\S]*?)\] as const;/);
+  if (!match) {
+    return [baseResolution];
+  }
+
+  const resolutions = [baseResolution];
+  for (const item of match[1].matchAll(/\{\s*width:\s*(\d+),\s*height:\s*(\d+)\s*\}/g)) {
+    resolutions.push({
+      width: Number(item[1]),
+      height: Number(item[2])
+    });
+  }
+  return resolutions.filter(
+    (resolution, index, sourceList) =>
+      sourceList.findIndex((item) => item.width === resolution.width && item.height === resolution.height) === index
+  );
+}
+
 async function readContract() {
   const source = await fs.readFile(path.join(editorRoot, 'src/shared/schema/projectContract.ts'), 'utf8');
+  const baseResolution = readBaseResolution(source);
   return {
     engine: readSingleQuotedConst(source, 'WEBAPP_ENGINE'),
     version: readNumberConst(source, 'WEBAPP_PROJECT_VERSION'),
-    baseResolution: readBaseResolution(source),
+    baseResolution,
+    supportedBaseResolutions: readSupportedBaseResolutions(source, baseResolution),
     elementTypes: new Set(readStringArrayConst(source, 'ELEMENT_TYPES')),
     textAlignValues: new Set(readStringArrayConst(source, 'TEXT_ALIGN_VALUES')),
     imageFitValues: new Set(readStringArrayConst(source, 'IMAGE_FIT_VALUES')),
@@ -101,6 +123,15 @@ async function readJson(filePath, issues) {
   } catch (error) {
     addIssue(issues, 'error', filePath, error?.code === 'ENOENT' ? 'File does not exist' : error.message);
     return null;
+  }
+
+  for (const issue of findSuspiciousText(raw)) {
+    addIssue(
+      issues,
+      'error',
+      filePath,
+      `Suspicious text encoding at ${issue.line}:${issue.column} (${issue.reason}): ${issue.snippet}`
+    );
   }
 
   try {
@@ -137,12 +168,17 @@ function validateBaseResolution(value, issues, file, contract, label = 'baseReso
     return;
   }
 
-  if (value.width !== contract.baseResolution.width || value.height !== contract.baseResolution.height) {
+  const supported = contract.supportedBaseResolutions.some(
+    (resolution) => value.width === resolution.width && value.height === resolution.height
+  );
+  if (!supported) {
     addIssue(
       issues,
       'error',
       file,
-      `${label} must be ${contract.baseResolution.width}x${contract.baseResolution.height}`
+      `${label} must be one of ${contract.supportedBaseResolutions
+        .map((resolution) => `${resolution.width}x${resolution.height}`)
+        .join(', ')}`
     );
   }
 }
@@ -287,6 +323,9 @@ async function validateElement(element, issues, file, contract, assetsRoot, elem
     addIssue(issues, 'error', file, `${elementLabel}.height must be greater than 0`);
   }
 
+  if (element.rotation !== undefined && (typeof element.rotation !== 'number' || !Number.isFinite(element.rotation))) {
+    addIssue(issues, 'error', file, `${elementLabel}.rotation must be a finite number`);
+  }
   if (element.visible !== undefined && typeof element.visible !== 'boolean') {
     addIssue(issues, 'error', file, `${elementLabel}.visible must be a boolean`);
   }

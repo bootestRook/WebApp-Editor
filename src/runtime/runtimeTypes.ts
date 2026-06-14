@@ -42,6 +42,7 @@ export type RuntimeElement = {
   y: number;
   width: number;
   height: number;
+  rotation?: number;
   visible?: boolean;
   layerGroup?: string;
   layerOrder?: number;
@@ -69,5 +70,7 @@ export type ProjectAsset = {
   assetPath?: string;
   url: string;
   size: number;
+  naturalWidth?: number;
+  naturalHeight?: number;
   kind: 'folder' | 'layout' | 'image' | 'audio' | 'effect' | 'component' | 'script' | 'data' | 'unknown';
 };

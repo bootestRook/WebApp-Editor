@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from 'react';
-import { ChevronDown, ChevronRight, FileCode2, FileImage, Folder, FolderKanban, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileCode2, FileImage, Folder, FolderKanban, Save, Search, Trash2 } from 'lucide-react';
 import type { ProjectAsset, RuntimeElement } from '../../runtime/runtimeTypes';
-import { createComponentAsset, deleteAsset, loadAssets, revealAsset, revealProjectFile } from '../services/projectService';
+import {
+  createComponentAsset,
+  deleteAsset,
+  loadAssets,
+  revealAsset,
+  revealProjectFile,
+  saveProjectSettings
+} from '../services/projectService';
 import { openLayout, saveLayout } from '../services/layoutService';
 import { useEditorStore } from '../store/editorStore';
+import { ResolutionSelector } from '../tools/ResolutionSelector';
+import { createResolutionPresetFromSize, type ResolutionPreset } from '../tools/resolutionPresets';
 
 type ContextMenuState = {
   x: number;
@@ -177,6 +186,12 @@ function isEditingText(target: EventTarget | null) {
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 }
 
+function getProjectResolutionPreset(project: { baseResolution: { width: number; height: number } } | null) {
+  const width = project?.baseResolution.width ?? 1920;
+  const height = project?.baseResolution.height ?? 1080;
+  return createResolutionPresetFromSize(width, height);
+}
+
 export function ProjectPanel() {
   const { state, dispatch } = useEditorStore();
   const [query, setQuery] = useState('');
@@ -187,6 +202,8 @@ export function ProjectPanel() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['layouts', 'ui']));
   const [componentAssetDraft, setComponentAssetDraft] = useState<ComponentAssetDraft>(null);
   const [pendingLayoutPath, setPendingLayoutPath] = useState<string | null>(null);
+  const [projectResolution, setProjectResolution] = useState<ResolutionPreset>(() => getProjectResolutionPreset(null));
+  const [savingProjectSettings, setSavingProjectSettings] = useState(false);
   const assets = useMemo(() => getOrderedAssets(state.assets, assetOrder), [assetOrder, state.assets]);
   const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
   const visibleRows = useMemo(() => flattenVisibleTree(assetTree, expandedFolders, query), [assetTree, expandedFolders, query]);
@@ -195,9 +212,36 @@ export function ProjectPanel() {
   const contextAsset = contextMenu?.assetPath
     ? assets.find((asset) => asset.path === contextMenu.assetPath) ?? null
     : null;
+  const currentProjectResolution = getProjectResolutionPreset(state.project);
+  const projectResolutionChanged =
+    projectResolution.width !== currentProjectResolution.width || projectResolution.height !== currentProjectResolution.height;
 
   const refreshAssets = async () => {
     dispatch({ type: 'set-assets', assets: await loadAssets() });
+  };
+
+  const saveResolutionSettings = async () => {
+    if (!state.project || state.dirty || savingProjectSettings) {
+      return;
+    }
+
+    setSavingProjectSettings(true);
+    try {
+      const result = await saveProjectSettings({
+        baseResolution: {
+          width: projectResolution.width,
+          height: projectResolution.height
+        }
+      });
+      dispatch({ type: 'project-settings:success', project: result.project, layout: result.layout });
+    } catch (error) {
+      dispatch({
+        type: 'log',
+        message: error instanceof Error ? error.message : 'Failed to save project settings'
+      });
+    } finally {
+      setSavingProjectSettings(false);
+    }
   };
 
   const selectAsset = (asset: ProjectAsset) => (event: MouseEvent<HTMLElement>) => {
@@ -427,6 +471,10 @@ export function ProjectPanel() {
   };
 
   useEffect(() => {
+    setProjectResolution(currentProjectResolution);
+  }, [currentProjectResolution.height, currentProjectResolution.width]);
+
+  useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         event.key !== 'Delete' ||
@@ -462,6 +510,23 @@ export function ProjectPanel() {
       <div className="project-meta">
         <span>{state.project?.name ?? 'Loading Project'}</span>
         <small>{state.activeLayoutPath ?? state.project?.entryLayout ?? 'layouts/main_page.layout.json'}</small>
+      </div>
+      <div className="project-settings">
+        <div className="project-settings-heading">
+          <strong>项目设置</strong>
+          <small>{state.dirty ? '保存当前 layout 后可切换基准分辨率' : '基准分辨率'}</small>
+        </div>
+        <ResolutionSelector value={projectResolution} onChange={setProjectResolution} allowCustom={false} />
+        <button
+          type="button"
+          className="project-settings-save"
+          disabled={!projectResolutionChanged || state.dirty || savingProjectSettings}
+          title={state.dirty ? '请先保存当前 layout' : '保存项目基准分辨率'}
+          onClick={() => void saveResolutionSettings()}
+        >
+          <Save size={14} />
+          {savingProjectSettings ? '保存中' : '保存设置'}
+        </button>
       </div>
       <label className="project-search">
         <Search size={14} />
